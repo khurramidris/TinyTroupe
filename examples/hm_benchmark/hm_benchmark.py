@@ -135,17 +135,34 @@ def _safe_list(series: pd.Series, n: int) -> list[str]:
     return vals.value_counts().head(n).index.tolist()
 
 
+def _clean_text_value(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    return "" if text.lower() in {"nan", "none", "<na>"} else text
+
+
 def _product_prompt(row: pd.Series) -> str:
-    parts = [
-        f"Product name: {row.get('prod_name', '')}",
-        f"Product type: {row.get('product_type_name', '')}",
-        f"Colour: {row.get('colour_group_name', '')}",
-        f"Graphical appearance: {row.get('graphical_appearance_name', '')}",
-        f"Garment group: {row.get('garment_group_name', '')}",
-        f"Section: {row.get('section_name', '')}",
-        f"Description: {row.get('detail_desc', '')}",
+    fields = [
+        ("Product name", "prod_name"),
+        ("Product type", "product_type_name"),
+        ("Colour", "colour_group_name"),
+        ("Graphical appearance", "graphical_appearance_name"),
+        ("Garment group", "garment_group_name"),
+        ("Section", "section_name"),
+        ("Description", "detail_desc"),
     ]
-    product = "\n".join(p for p in parts if not p.endswith(": "))
+    parts = []
+    for label, key in fields:
+        value = _clean_text_value(row.get(key, ""))
+        if value:
+            parts.append(f"{label}: {value}")
+    product = "\n".join(parts)
     return (
         "You are making an independent H&M shopping decision. Consider this newly appearing trouser product:\n\n"
         f"{product}\n\n"
@@ -218,7 +235,8 @@ def prepare(args: argparse.Namespace) -> None:
     qualified = pd.read_csv(baseline_dir / "qualified_test_articles.csv", parse_dates=["launch_date"])
     qualified["article_id"] = qualified["article_id"].astype(np.int64)
     qualified = qualified[(qualified["launch_date"] >= TEST_START) & (qualified["launch_date"] <= TEST_END)].copy()
-    qualified = qualified.sort_values(["mapped_buyers", "launch_date", "article_id"], ascending=[False, True, True])
+    # Match the frozen H&M Stage-B selection exactly: support first, article_id tie-break only.
+    qualified = qualified.sort_values(["mapped_buyers", "article_id"], ascending=[False, True])
     selected = qualified.head(args.n_products).copy()
     if len(selected) < args.n_products:
         raise RuntimeError(f"Only {len(selected)} qualified products available; requested {args.n_products}")
@@ -248,15 +266,14 @@ def prepare(args: argparse.Namespace) -> None:
             "typical_paid_price_tier": str(cell["price_tier"]),
             "most_common_historical_product_type": str(cell["taste_bucket"]),
         }
+        # Keep TT-R aligned to the actual rich evidence rendered by the frozen H&M Stage-B prompt.
+        # Do not expose raw H&M normalized prices or support counts as additional treatment variables.
         rich_evidence = {
             "top_colours": _safe_list(g["colour_group_name"], 4),
             "top_graphical_appearances": _safe_list(g["graphical_appearance_name"], 3),
             "top_garment_groups": _safe_list(g["garment_group_name"], 3),
             "top_sections": _safe_list(g["section_name"], 3),
             "representative_products": _safe_list(g["prod_name"], 5),
-            "unique_pre_cutoff_trouser_products": int(g["article_id"].nunique()),
-            "unique_pre_cutoff_trouser_buyers": int(g["customer_id"].nunique()),
-            "mean_pre_cutoff_trouser_paid_price": None if g["price"].dropna().empty else float(g["price"].mean()),
             "evidence_cutoff": CUTOFF.date().isoformat(),
         }
         n_customers = int(cell["n_customers"])
@@ -360,7 +377,7 @@ def prepare(args: argparse.Namespace) -> None:
         "article_revision": ARTICLE_REVISION,
         "article_fingerprint": article_fingerprint,
         "baseline_exp007_decision": baseline_summary.get("exp007_decision"),
-        "selection_rule": f"Top {args.n_products} qualified Experiment 007 products by mapped unique buyers; ties by launch date then article_id.",
+        "selection_rule": f"Top {args.n_products} qualified Experiment 007 products by mapped unique buyers; ties by article_id.",
         "labels_not_in_query_plan": True,
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
