@@ -42,7 +42,8 @@ jobs:
           mod.test_parse_json_object_plain_and_fenced()
           mod.test_population_weighted_normalization()
           mod.test_evaluate_counts_prefers_correct_prediction()
-          print("3 benchmark helper tests passed")
+          mod.test_product_prompt_omits_missing_values()
+          print("4 benchmark helper tests passed")
           PY
 
   prepare-hm:
@@ -80,19 +81,44 @@ jobs:
             --output-dir outputs/hm_tinytroupe \
             --n-products 50
 
-      - name: Verify frozen bundle shape
+      - name: Verify frozen bundle shape and treatment hygiene
         working-directory: tinytroupe
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          m = json.loads(Path("outputs/hm_tinytroupe/manifest.json").read_text())
+          import pandas as pd
+
+          root = Path("outputs/hm_tinytroupe")
+          m = json.loads((root / "manifest.json").read_text())
           assert m["scientific_status"] == "EXPLORATORY_RETROSPECTIVE"
           assert m["n_products"] == 50
           assert m["n_personas"] == 50
           assert m["n_queries"] == 5000
           assert m["labels_not_in_query_plan"] is True
-          print(json.dumps({k: m[k] for k in ["n_products", "n_personas", "n_queries", "query_plan_sha256"]}, indent=2))
+          assert m["selection_rule"].endswith("ties by article_id.")
+
+          personas = [json.loads(line) for line in (root / "personas.jsonl").read_text().splitlines() if line.strip()]
+          rich = [r for r in personas if r["arm"] == "TT-R"]
+          assert len(rich) == 50
+          expected = {
+              "top_colours",
+              "top_graphical_appearances",
+              "top_garment_groups",
+              "top_sections",
+              "representative_products",
+              "evidence_cutoff",
+          }
+          for row in rich:
+              evidence = row["persona"]["historical_trouser_style_evidence"]
+              assert set(evidence) == expected
+              assert "mean_pre_cutoff_trouser_paid_price" not in evidence
+              assert "unique_pre_cutoff_trouser_products" not in evidence
+              assert "unique_pre_cutoff_trouser_buyers" not in evidence
+
+          queries = pd.read_csv(root / "queries.csv")
+          assert not queries["product_prompt"].str.lower().str.contains(": nan", regex=False).any()
+          print(json.dumps({k: m[k] for k in ["n_products", "n_personas", "n_queries", "query_plan_sha256", "selection_rule"]}, indent=2))
           PY
 
       - name: Upload frozen benchmark bundle
