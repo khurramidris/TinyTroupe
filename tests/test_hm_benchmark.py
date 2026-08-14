@@ -27,3 +27,18 @@ def test_evaluate_counts_prefers_correct_prediction():
     bad = hm._evaluate_counts(counts, np.array([0.1, 0.9]))
     assert good["nll"] < bad["nll"]
     assert good["js_divergence"] < bad["js_divergence"]
+
+
+def test_product_prompt_omits_missing_values():
+    row = hm.pd.Series({
+        "prod_name": "Tailored trousers",
+        "product_type_name": np.nan,
+        "colour_group_name": "Black",
+        "graphical_appearance_name": None,
+        "detail_desc": "nan",
+    })
+    prompt = hm._product_prompt(row)
+    assert "Product name: Tailored trousers" in prompt
+    assert "Colour: Black" in prompt
+    assert "nan" not in prompt.lower()
+    assert "Product type:" not in prompt
