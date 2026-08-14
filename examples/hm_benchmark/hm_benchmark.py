@@ -169,8 +169,8 @@ def _product_prompt(row: pd.Series) -> str:
         "Estimate your own relative affinity for buying this product using only your persona and the product information above. "
         "Do not infer popularity, inventory, recommendations, other customers' behavior, or any future outcome. "
         "Use a probability-like affinity between 0 and 1; it is a comparative score for this benchmark, not a calibrated conversion probability.\n\n"
-        "Respond with a single SPEAK action whose content is exactly one JSON object in this form: "
-        '{"p_buy": <number from 0 to 1>, "reason": "<=25 words"}. Then finish with DONE.'
+        "In your TALK action, make the content exactly one JSON object in this form: "
+        '{"p_buy": <number from 0 to 1>, "reason": "<=25 words"}. Follow the normal TinyTroupe action sequence and finish with DONE.'
     )
 
 
@@ -282,9 +282,10 @@ def prepare(args: argparse.Namespace) -> None:
             persona = {
                 "name": f"H&M segment {int(pidx):02d}",
                 "age": str(cell["age_bin"]),
-                "nationality": "Not observed in the H&M benchmark data",
-                "country_of_residence": "Not observed in the H&M benchmark data",
-                "occupation": "Synthetic H&M customer segment; occupation unobserved",
+                # TinyTroupe's prompt explicitly treats None as unknown and tells the model not to invent it.
+                "nationality": None,
+                "country_of_residence": None,
+                "occupation": None,
                 "shopping_profile": coarse_profile,
                 "evidence_provenance": {
                     "source": "H&M public transactions and pre-cutoff persona-cell construction",
@@ -397,7 +398,7 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         pass
     match = re.search(r"\{.*\}", text, flags=re.S)
     if not match:
-        raise ValueError("No JSON object found in SPEAK content")
+        raise ValueError("No JSON object found in TALK content")
     obj = json.loads(match.group(0))
     if not isinstance(obj, dict):
         raise ValueError("Parsed JSON is not an object")
@@ -493,19 +494,19 @@ def run(args: argparse.Namespace) -> None:
         }
         try:
             actions = agent.listen_and_act(str(row["product_prompt"]), return_actions=True, communication_display=False)
-            speak_contents = []
+            talk_contents = []
             for item in actions or []:
                 action = item.get("action", {}) if isinstance(item, dict) else {}
-                if action.get("type") == "SPEAK":
-                    speak_contents.append(str(action.get("content", "")))
-            if not speak_contents:
-                raise ValueError(f"No SPEAK action returned; actions={actions}")
-            raw = speak_contents[-1]
+                if action.get("type") == "TALK":
+                    talk_contents.append(str(action.get("content", "")))
+            if not talk_contents:
+                raise ValueError(f"No TALK action returned; actions={actions}")
+            raw = talk_contents[-1]
             payload = _parse_json_object(raw)
             p_buy = float(payload["p_buy"])
             if not math.isfinite(p_buy) or p_buy < 0.0 or p_buy > 1.0:
                 raise ValueError(f"p_buy outside [0,1]: {p_buy}")
-            record.update({"status": "ok", "p_buy": p_buy, "reason": str(payload.get("reason", ""))[:500], "raw_speak": raw})
+            record.update({"status": "ok", "p_buy": p_buy, "reason": str(payload.get("reason", ""))[:500], "raw_talk": raw})
         except Exception as exc:
             record.update({"status": "error", "error": f"{type(exc).__name__}: {exc}"})
         finally:
