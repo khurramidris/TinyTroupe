@@ -1,0 +1,133 @@
+name: H&M TinyTroupe exploratory benchmark
+
+on:
+  pull_request:
+    paths:
+      - "examples/hm_benchmark/**"
+      - "tests/test_hm_benchmark.py"
+      - ".github/workflows/hm-tinytroupe-benchmark.yml"
+  workflow_dispatch:
+    inputs:
+      run_full_llm:
+        description: "Run the full 5,000-query TinyTroupe batch (requires OPENAI_API_KEY secret)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install numpy pandas pytest
+      - run: pytest -q tests/test_hm_benchmark.py
+
+  prepare-hm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout TinyTroupe fork
+        uses: actions/checkout@v4
+        with:
+          path: tinytroupe
+
+      - name: Checkout frozen H&M research branch
+        uses: actions/checkout@v4
+        with:
+          repository: khurramidris/LLM-demand-simulator
+          ref: research/07-expanded-cold-start-confirmation
+          path: hm-source
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: tinytroupe/pyproject.toml
+
+      - name: Install benchmark dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "numpy<3" "pandas<3" "scipy<2" "scikit-learn<2" "datasets>=3,<5" "pyarrow<22" huggingface_hub
+
+      - name: Prepare exact 50-product exploratory bundle
+        working-directory: tinytroupe
+        run: |
+          python examples/hm_benchmark/hm_benchmark.py prepare \
+            --hm-repo ../hm-source \
+            --output-dir outputs/hm_tinytroupe \
+            --n-products 50
+
+      - name: Verify frozen bundle shape
+        working-directory: tinytroupe
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path("outputs/hm_tinytroupe/manifest.json").read_text())
+          assert m["scientific_status"] == "EXPLORATORY_RETROSPECTIVE"
+          assert m["n_products"] == 50
+          assert m["n_personas"] == 50
+          assert m["n_queries"] == 5000
+          assert m["labels_not_in_query_plan"] is True
+          print(json.dumps({k: m[k] for k in ["n_products", "n_personas", "n_queries", "query_plan_sha256"]}, indent=2))
+          PY
+
+      - name: Upload frozen benchmark bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: hm-tinytroupe-bundle
+          path: tinytroupe/outputs/hm_tinytroupe
+          if-no-files-found: error
+
+      - name: TinyTroupe API smoke when a key is configured
+        working-directory: tinytroupe
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        if: env.OPENAI_API_KEY != ''
+        run: |
+          python -m pip install -e .
+          python examples/hm_benchmark/hm_benchmark.py run \
+            --bundle outputs/hm_tinytroupe \
+            --output outputs/hm_tinytroupe/smoke_responses.jsonl \
+            --cache-file outputs/hm_tinytroupe/smoke_cache.json \
+            --model gpt-5-mini \
+            --workers 2 \
+            --max-queries 10
+
+      - name: Full 5,000-query batch when explicitly dispatched
+        working-directory: tinytroupe
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        if: github.event_name == 'workflow_dispatch' && inputs.run_full_llm == true && env.OPENAI_API_KEY != ''
+        run: |
+          python -m pip install -e .
+          python examples/hm_benchmark/hm_benchmark.py run \
+            --bundle outputs/hm_tinytroupe \
+            --output outputs/hm_tinytroupe/responses.jsonl \
+            --cache-file outputs/hm_tinytroupe/full_cache.json \
+            --model gpt-5-mini \
+            --workers 4
+          python examples/hm_benchmark/hm_benchmark.py evaluate \
+            --bundle outputs/hm_tinytroupe \
+            --responses outputs/hm_tinytroupe/responses.jsonl \
+            --output-dir outputs/hm_tinytroupe/evaluation \
+            --replicate 1
+
+      - name: Upload any LLM responses/evaluation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hm-tinytroupe-llm-results
+          path: |
+            tinytroupe/outputs/hm_tinytroupe/*responses.jsonl
+            tinytroupe/outputs/hm_tinytroupe/evaluation
+          if-no-files-found: ignore
