@@ -11,9 +11,9 @@ The benchmark remains narrow: it predicts **which frozen customer/persona groups
 ## Arms
 
 - **TT-C** — a TinyPerson built from the coarse H&M persona-cell fields: age group, engagement level, typical paid-price tier, and most common historical product type.
-- **TT-R** — the same TinyPerson plus pre-2019-09-20 trouser evidence: top colours, graphical appearances, garment groups, sections, representative product names, historical trouser support, and mean paid price.
+- **TT-R** — the same TinyPerson plus the pre-2019-09-20 trouser style evidence actually rendered by the frozen H&M Stage-B prompt: top colours, graphical appearances, garment groups, sections, and representative product names.
 
-No future/test behavior enters either persona. Unknown demographics are explicitly left unknown rather than invented.
+No future/test behavior enters either persona. Unknown demographics are explicitly left unknown rather than invented. Raw H&M normalized prices and persona support counts are deliberately not added to TT-R because the frozen Stage-B prompt did not render them; this keeps the treatment aligned to the original H&M experimental design.
 
 For every product/persona pair, a fresh TinyPerson makes an independent decision. Agents do not talk to each other and do not carry memory from one product to the next. The response is a single `p_buy` affinity in `[0,1]`. For each product, the 50 affinities are converted to buyer-composition probabilities using the frozen persona-cell population weights:
 
@@ -23,7 +23,7 @@ followed by normalization across the 50 cells. This matches the H&M Stage-B desi
 
 ## Frozen comparison set
 
-By default the preparation step uses the 50 highest-support qualified products from the independent Experiment 007 window (2019-10-18 through 2020-01-31). That gives:
+By default the preparation step uses the 50 highest-support qualified products from the independent Experiment 007 window (2019-10-18 through 2020-01-31), with `article_id` as the frozen support-tie breaker. That gives:
 
 - 50 products
 - 50 persona cells
