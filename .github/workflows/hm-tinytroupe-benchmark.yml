@@ -42,7 +42,7 @@ jobs:
           mod.test_parse_json_object_plain_and_fenced()
           mod.test_population_weighted_normalization()
           mod.test_evaluate_counts_prefers_correct_prediction()
-          mod.test_product_prompt_omits_missing_values()
+          mod.test_product_prompt_omits_missing_values_and_uses_talk_action()
           print("4 benchmark helper tests passed")
           PY
 
@@ -109,6 +109,11 @@ jobs:
               "representative_products",
               "evidence_cutoff",
           }
+          for row in personas:
+              persona = row["persona"]
+              assert persona["nationality"] is None
+              assert persona["country_of_residence"] is None
+              assert persona["occupation"] is None
           for row in rich:
               evidence = row["persona"]["historical_trouser_style_evidence"]
               assert set(evidence) == expected
@@ -118,6 +123,8 @@ jobs:
 
           queries = pd.read_csv(root / "queries.csv")
           assert not queries["product_prompt"].str.lower().str.contains(": nan", regex=False).any()
+          assert queries["product_prompt"].str.contains("TALK action", regex=False).all()
+          assert not queries["product_prompt"].str.contains("SPEAK action", regex=False).any()
           print(json.dumps({k: m[k] for k in ["n_products", "n_personas", "n_queries", "query_plan_sha256", "selection_rule"]}, indent=2))
           PY
 
