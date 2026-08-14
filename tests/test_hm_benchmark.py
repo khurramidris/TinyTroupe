@@ -29,7 +29,7 @@ def test_evaluate_counts_prefers_correct_prediction():
     assert good["js_divergence"] < bad["js_divergence"]
 
 
-def test_product_prompt_omits_missing_values():
+def test_product_prompt_omits_missing_values_and_uses_talk_action():
     row = hm.pd.Series({
         "prod_name": "Tailored trousers",
         "product_type_name": np.nan,
@@ -42,3 +42,5 @@ def test_product_prompt_omits_missing_values():
     assert "Colour: Black" in prompt
     assert "nan" not in prompt.lower()
     assert "Product type:" not in prompt
+    assert "TALK action" in prompt
+    assert "SPEAK action" not in prompt
